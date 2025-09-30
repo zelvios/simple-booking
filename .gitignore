@@ -1,0 +1,73 @@
+# ============================
+# Global
+# ============================
+# Logs
+*.log
+npm-debug.log*
+
+# Environment files
+.env
+.env.*
+
+# IDEs
+.idea/
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# ============================
+# Rust / Backend
+# ============================
+**/target/
+
+# Diesel CLI temp files
+diesel.toml.bak
+diesel.toml.local
+
+# Rust coverage/debug
+*.profraw
+*.profdata
+
+# ============================
+# Frontend (Tauri + Svelte)
+# ============================
+# Node modules
+frontend/node_modules/
+frontend/.svelte-kit/
+frontend/build/
+frontend/dist/
+frontend/.vite/
+
+# npm build artifacts
+/build
+/.svelte-kit
+/package
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# Lock file
+package-lock.json
+
+# ============================
+# Tauri build artifacts
+# ============================
+src-tauri/target/
+src-tauri/release/
+
+# ============================
+# OS / Build artifacts
+# ============================
+# MacOS
+*.app
+*.dmg
+
+# Windows
+*.exe
+*.msi
+
+# Linux
+*.deb
+*.AppImage
+

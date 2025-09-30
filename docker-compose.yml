@@ -1,0 +1,27 @@
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: simple_booking
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  backend:
+    build:
+      context: ./backend
+    depends_on:
+      - db
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgres://postgres:password@db:5432/simple_booking
+      RUST_LOG: info
+    ports:
+      - "8080:8080"
+
+volumes:
+  db_data:
