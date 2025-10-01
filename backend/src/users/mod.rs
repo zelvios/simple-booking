@@ -20,6 +20,11 @@ pub struct SignInRequest {
     pub password: String,
 }
 
+#[derive(Deserialize)]
+pub struct VerifyTok {
+    pub token: Option<String>,
+}
+
 #[post("/users")]
 pub async fn create_user_endpoint(
     pool: web::Data<DbPool>,
@@ -132,6 +137,42 @@ pub async fn sign_in_endpoint(
         Err(e) => {
             eprintln!("Blocking error: {}", e);
             HttpResponse::InternalServerError().body("Error signing in")
+        }
+    }
+}
+
+#[post("/users/verify/token")]
+pub async fn users_verify_token_endpoint(
+    pool: web::Data<DbPool>,
+    body: web::Json<VerifyTok>,
+) -> HttpResponse {
+    let token = match &body.token {
+        Some(t) => t.clone(),
+        None => {
+            return HttpResponse::BadRequest()
+                .json(serde_json::json!({"valid": false, "reason": "no_token"}));
+        }
+    };
+
+    let mut conn = match services::get_conn(&pool) {
+        Ok(c) => c,
+        Err(resp) => return resp,
+    };
+    let secret = services::get_jwt_secret();
+
+    match web::block(move || service::verify_token(&mut conn, &token, &secret)).await {
+        Ok(Ok((true, _))) => HttpResponse::Ok().json(serde_json::json!({"valid": true})),
+        Ok(Ok((false, reason))) => HttpResponse::Ok().json(serde_json::json!({
+            "valid": false,
+            "reason": reason
+        })),
+        Ok(Err(e)) => {
+            eprintln!("verify_token error: {}", e);
+            HttpResponse::InternalServerError().body("Error verifying token")
+        }
+        Err(e) => {
+            eprintln!("blocking error: {}", e);
+            HttpResponse::InternalServerError().body("Error verifying token")
         }
     }
 }

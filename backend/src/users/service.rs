@@ -3,10 +3,11 @@ use anyhow::Result;
 use argon2::{password_hash::SaltString, Argon2, PasswordHasher, PasswordVerifier};
 use chrono::Utc;
 use diesel::prelude::*;
-use jsonwebtoken::{encode, EncodingKey, Header};
+use jsonwebtoken::errors::ErrorKind;
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use rand::rngs::OsRng;
 use rand::Rng;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
 use uuid::Uuid;
@@ -18,7 +19,7 @@ fn get_jwt_expire() -> i64 {
         .unwrap_or(3600) // 1 hour
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct Claims {
     sub: Uuid,
     username: String,
@@ -179,4 +180,32 @@ pub fn signin_user(
     let token = generate_jwt(&updated_user, secret, get_jwt_expire());
 
     Ok((updated_user, token))
+}
+
+pub fn verify_token(conn: &mut PgConnection, token: &str, secret: &str) -> Result<(bool, String)> {
+    use crate::schema::users::dsl::*;
+
+    match decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(secret.as_ref()),
+        &Validation::default(),
+    ) {
+        Ok(token_data) => {
+            let claims = token_data.claims;
+            match users.find(claims.sub).first::<User>(conn).optional()? {
+                Some(user) => {
+                    if user.token_version == claims.token_version {
+                        Ok((true, "ok".to_string()))
+                    } else {
+                        Ok((false, "token_version_mismatch".to_string()))
+                    }
+                }
+                None => Ok((false, "user_not_found".to_string())),
+            }
+        }
+        Err(err) => match *err.kind() {
+            ErrorKind::ExpiredSignature => Ok((false, "expired".to_string())),
+            _ => Ok((false, "invalid".to_string())),
+        },
+    }
 }

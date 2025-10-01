@@ -1,9 +1,13 @@
+extern crate core;
+
 mod models;
 mod schema;
 mod services;
 mod users;
 
-use crate::users::{create_user_endpoint, get_users_endpoint, sign_in_endpoint};
+use crate::users::{
+    create_user_endpoint, get_users_endpoint, sign_in_endpoint, users_verify_token_endpoint,
+};
 use actix_web::{web, App, HttpServer};
 use diesel::pg::PgConnection;
 use diesel::r2d2;
@@ -30,6 +34,7 @@ async fn main() -> anyhow::Result<()> {
             .service(create_user_endpoint)
             .service(get_users_endpoint)
             .service(sign_in_endpoint)
+            .service(users_verify_token_endpoint)
     })
     .bind(("0.0.0.0", 3000))?
     .run()
