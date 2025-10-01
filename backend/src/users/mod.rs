@@ -1,6 +1,6 @@
 use crate::models::NewUser;
 use crate::{services, DbPool};
-use actix_web::{post, web, HttpResponse};
+use actix_web::{get, post, web, HttpResponse};
 use serde::Deserialize;
 
 pub mod service;
@@ -21,7 +21,7 @@ pub async fn create_user_endpoint(
 ) -> HttpResponse {
     let mut conn = match services::get_conn(&pool) {
         Ok(c) => c,
-        Err(resp) => return resp,
+        Err(err) => return err,
     };
     let secret = services::get_jwt_secret();
 
@@ -45,7 +45,6 @@ pub async fn create_user_endpoint(
     match web::block(move || service::create_user(&mut conn, new_user, &secret)).await {
         Ok(Ok((user, token))) => HttpResponse::Ok().json(serde_json::json!({
             "user": {
-                "id": user.id,
                 "username": user.username,
                 "email": user.email,
             },
@@ -58,6 +57,38 @@ pub async fn create_user_endpoint(
         Err(e) => {
             eprintln!("Blocking error: {}", e);
             HttpResponse::InternalServerError().body("Error creating user")
+        }
+    }
+}
+
+#[get("/users")]
+pub async fn get_users_endpoint(pool: web::Data<DbPool>) -> HttpResponse {
+    let mut conn = match services::get_conn(&pool) {
+        Ok(c) => c,
+        Err(err) => return err,
+    };
+
+    match web::block(move || service::get_users(&mut conn)).await {
+        Ok(Ok(users)) => HttpResponse::Ok().json(
+            users
+                .into_iter()
+                .map(|user| {
+                    serde_json::json!({
+                        "username": user.username,
+                        "email": user.email,
+                        "first_name": user.first_name,
+                        "last_name": user.last_name,
+                    })
+                })
+                .collect::<Vec<_>>(),
+        ),
+        Ok(Err(e)) => {
+            eprintln!("DB query error: {}", e);
+            HttpResponse::InternalServerError().body("Error fetching users")
+        }
+        Err(e) => {
+            eprintln!("Blocking error: {}", e);
+            HttpResponse::InternalServerError().body("Blocking error")
         }
     }
 }

@@ -1,4 +1,4 @@
-use crate::models::{NewUser, User};
+use crate::models::{NewUser, User, UserBasic};
 use anyhow::Result;
 use argon2::{password_hash::SaltString, Argon2, PasswordHasher};
 use diesel::prelude::*;
@@ -39,6 +39,27 @@ pub fn generate_jwt(user: &User, secret: &str, exp: usize) -> String {
     )
     .expect("Failed to encode JWT")
 }
+
+pub fn email_exists(conn: &mut PgConnection, email_check: &str) -> Result<bool> {
+    use crate::schema::users::dsl::*;
+    let exists = users
+        .filter(email.eq(email_check))
+        .select(id)
+        .first::<Uuid>(conn)
+        .optional()?;
+    Ok(exists.is_some())
+}
+
+pub fn username_exists(conn: &mut PgConnection, username_check: &str) -> Result<bool> {
+    use crate::schema::users::dsl::*;
+    let exists = users
+        .filter(username.eq(username_check))
+        .select(id)
+        .first::<Uuid>(conn)
+        .optional()?;
+    Ok(exists.is_some())
+}
+
 pub fn create_user(
     conn: &mut PgConnection,
     new_user: NewUser,
@@ -63,22 +84,10 @@ pub fn create_user(
     Ok((user, token))
 }
 
-pub fn email_exists(conn: &mut PgConnection, email_check: &str) -> Result<bool> {
+pub fn get_users(conn: &mut PgConnection) -> QueryResult<Vec<UserBasic>> {
     use crate::schema::users::dsl::*;
-    let exists = users
-        .filter(email.eq(email_check))
-        .select(id)
-        .first::<Uuid>(conn)
-        .optional()?;
-    Ok(exists.is_some())
-}
 
-pub fn username_exists(conn: &mut PgConnection, username_check: &str) -> Result<bool> {
-    use crate::schema::users::dsl::*;
-    let exists = users
-        .filter(username.eq(username_check))
-        .select(id)
-        .first::<Uuid>(conn)
-        .optional()?;
-    Ok(exists.is_some())
+    users
+        .select((username, email, first_name, last_name))
+        .load::<UserBasic>(conn)
 }

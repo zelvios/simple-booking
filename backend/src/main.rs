@@ -3,13 +3,14 @@ mod schema;
 mod services;
 mod users;
 
-use crate::users::create_user_endpoint;
+use crate::users::{create_user_endpoint, get_users_endpoint};
 use actix_web::{web, App, HttpServer};
 use diesel::pg::PgConnection;
 use diesel::r2d2;
 use diesel::r2d2::ConnectionManager;
 use dotenvy::dotenv;
 use std::env;
+
 pub type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
 
 #[actix_web::main]
@@ -27,8 +28,9 @@ async fn main() -> anyhow::Result<()> {
         App::new()
             .app_data(web::Data::new(pool.clone()))
             .service(create_user_endpoint)
+            .service(get_users_endpoint)
     })
-    .bind(("0.0.0.0", 8080))?
+    .bind(("0.0.0.0", 3000))?
     .run()
     .await?;
     Ok(())

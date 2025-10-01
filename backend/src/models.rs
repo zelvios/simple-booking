@@ -97,3 +97,11 @@ pub struct NewUser {
     pub password_hash: String,
     pub token_version: i32,
 }
+
+#[derive(Queryable, Debug)]
+pub struct UserBasic {
+    pub username: String,
+    pub email: String,
+    pub first_name: String,
+    pub last_name: String,
+}

@@ -38,4 +38,4 @@ COPY --from=builder /usr/src/app/target/release/backend /usr/local/bin/backend
 COPY --from=builder /usr/local/cargo/bin/diesel /usr/local/bin/diesel
 
 # wait for Postgres, run migrations, then start backend
-CMD ["sh", "-c", "until pg_isready -h db -p 5432; do sleep 1; done && diesel migration run --migration-dir ./migrations && exec /usr/local/bin/backend"]
+CMD ["sh","-c","until pg_isready -h db -p 5432; do echo 'Waiting for Postgres...'; sleep 1; done && diesel migration run --migration-dir ./migrations && exec /usr/local/bin/backend"]
