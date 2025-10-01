@@ -14,6 +14,12 @@ pub struct CreateUserRequest {
     pub password: String,
 }
 
+#[derive(Deserialize)]
+pub struct SignInRequest {
+    pub username_or_email: String,
+    pub password: String,
+}
+
 #[post("/users")]
 pub async fn create_user_endpoint(
     pool: web::Data<DbPool>,
@@ -90,6 +96,42 @@ pub async fn get_users_endpoint(pool: web::Data<DbPool>) -> HttpResponse {
         Err(e) => {
             eprintln!("Blocking error: {}", e);
             HttpResponse::InternalServerError().body("Blocking error")
+        }
+    }
+}
+
+#[post("/sign-in")]
+pub async fn sign_in_endpoint(
+    pool: web::Data<DbPool>,
+    body: web::Json<SignInRequest>,
+) -> HttpResponse {
+    let mut conn = match services::get_conn(&pool) {
+        Ok(c) => c,
+        Err(err) => return err,
+    };
+    let secret = services::get_jwt_secret();
+
+    match web::block(move || {
+        service::signin_user(&mut conn, &body.username_or_email, &body.password, &secret)
+    })
+    .await
+    {
+        Ok(Ok((user, token))) => HttpResponse::Ok().json(serde_json::json!({
+            "user": {
+                "username": user.username,
+                "email": user.email,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+            },
+            "token": token
+        })),
+        Ok(Err(e)) => {
+            eprintln!("Sign-in error: {}", e);
+            HttpResponse::Unauthorized().body("Invalid username/email or password {}")
+        }
+        Err(e) => {
+            eprintln!("Blocking error: {}", e);
+            HttpResponse::InternalServerError().body("Error signing in")
         }
     }
 }

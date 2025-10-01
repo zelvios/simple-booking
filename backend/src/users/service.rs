@@ -1,19 +1,29 @@
 use crate::models::{NewUser, User, UserBasic};
 use anyhow::Result;
-use argon2::{password_hash::SaltString, Argon2, PasswordHasher};
+use argon2::{password_hash::SaltString, Argon2, PasswordHasher, PasswordVerifier};
+use chrono::Utc;
 use diesel::prelude::*;
 use jsonwebtoken::{encode, EncodingKey, Header};
 use rand::rngs::OsRng;
+use rand::Rng;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::env;
 use uuid::Uuid;
+
+fn get_jwt_expire() -> i64 {
+    env::var("JWT_EXPIRE_SECONDS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(3600) // 1 hour
+}
 
 #[derive(Serialize)]
 struct Claims {
     sub: Uuid,
     username: String,
     token_version: i32,
-    exp: usize,
+    exp: i64,
 }
 
 pub fn hash_password(password: &str) -> std::result::Result<String, argon2::password_hash::Error> {
@@ -26,12 +36,12 @@ pub fn hash_password(password: &str) -> std::result::Result<String, argon2::pass
     Ok(hash)
 }
 
-pub fn generate_jwt(user: &User, secret: &str, exp: usize) -> String {
+pub fn generate_jwt(user: &User, secret: &str, expire_seconds: i64) -> String {
     let claims = Claims {
         sub: user.id,
         username: user.username.clone(),
         token_version: user.token_version,
-        exp,
+        exp: Utc::now().timestamp() + expire_seconds,
     };
     encode(
         &Header::default(),
@@ -81,7 +91,7 @@ pub fn create_user(
         .values(&new_user)
         .get_result(conn)?;
 
-    let token = generate_jwt(&user, secret, 3600);
+    let token = generate_jwt(&user, secret, get_jwt_expire());
     Ok((user, token))
 }
 
@@ -134,4 +144,39 @@ pub fn get_users(conn: &mut PgConnection) -> QueryResult<Vec<UserBasic>> {
         .collect();
 
     Ok(users)
+}
+
+pub fn signin_user(
+    conn: &mut PgConnection,
+    username_or_email: &str,
+    password: &str,
+    secret: &str,
+) -> Result<(User, String)> {
+    use crate::schema::users::dsl::*;
+    use anyhow::anyhow;
+
+    let user = users
+        .filter(
+            username
+                .eq(username_or_email)
+                .or(email.eq(username_or_email)),
+        )
+        .first::<User>(conn)
+        .map_err(|_| anyhow!("Invalid username/email or password"))?;
+
+    let parsed_hash = argon2::PasswordHash::new(&user.password_hash)
+        .map_err(|_| anyhow!("Failed to parse password hash"))?;
+
+    Argon2::default()
+        .verify_password(password.as_bytes(), &parsed_hash)
+        .map_err(|_| anyhow!("Invalid username/email or password"))?;
+
+    let new_token_version: i32 = rand::thread_rng().gen_range(1..=i32::MAX);
+    let updated_user = diesel::update(users.find(user.id))
+        .set(token_version.eq(new_token_version))
+        .get_result::<User>(conn)?;
+
+    let token = generate_jwt(&updated_user, secret, get_jwt_expire());
+
+    Ok((updated_user, token))
 }

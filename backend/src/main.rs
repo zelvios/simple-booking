@@ -3,7 +3,7 @@ mod schema;
 mod services;
 mod users;
 
-use crate::users::{create_user_endpoint, get_users_endpoint};
+use crate::users::{create_user_endpoint, get_users_endpoint, sign_in_endpoint};
 use actix_web::{web, App, HttpServer};
 use diesel::pg::PgConnection;
 use diesel::r2d2;
@@ -29,6 +29,7 @@ async fn main() -> anyhow::Result<()> {
             .app_data(web::Data::new(pool.clone()))
             .service(create_user_endpoint)
             .service(get_users_endpoint)
+            .service(sign_in_endpoint)
     })
     .bind(("0.0.0.0", 3000))?
     .run()
