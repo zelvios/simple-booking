@@ -5,6 +5,7 @@ use diesel::prelude::*;
 use jsonwebtoken::{encode, EncodingKey, Header};
 use rand::rngs::OsRng;
 use serde::Serialize;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 #[derive(Serialize)]
@@ -85,9 +86,52 @@ pub fn create_user(
 }
 
 pub fn get_users(conn: &mut PgConnection) -> QueryResult<Vec<UserBasic>> {
-    use crate::schema::users::dsl::*;
+    use crate::schema::roles::dsl as roles_dsl;
+    use crate::schema::users::dsl as users_dsl;
+    use crate::schema::users_roles::dsl as ur_dsl;
 
-    users
-        .select((username, email, first_name, last_name))
-        .load::<UserBasic>(conn)
+    let user_rows = users_dsl::users
+        .select((
+            users_dsl::id,
+            users_dsl::username,
+            users_dsl::email,
+            users_dsl::first_name,
+            users_dsl::last_name,
+        ))
+        .load::<(Uuid, String, String, String, String)>(conn)?;
+
+    let user_ids: Vec<Uuid> = user_rows.iter().map(|(id, _, _, _, _)| *id).collect();
+
+    let roles_rows = if user_ids.is_empty() {
+        Vec::new()
+    } else {
+        ur_dsl::users_roles
+            .inner_join(roles_dsl::roles.on(roles_dsl::id.eq(ur_dsl::role_id)))
+            .select((ur_dsl::user_id, roles_dsl::name))
+            .filter(ur_dsl::user_id.eq_any(&user_ids))
+            .load::<(Uuid, String)>(conn)?
+    };
+
+    let mut roles_map: HashMap<Uuid, Vec<String>> = HashMap::new();
+    for (uid, role_name) in roles_rows {
+        roles_map.entry(uid).or_default().push(role_name);
+    }
+
+    let users: Vec<UserBasic> = user_rows
+        .into_iter()
+        .map(|(id, username, email, first_name, last_name)| {
+            let roles_for_user = roles_map
+                .remove(&id)
+                .unwrap_or_else(|| vec!["default".to_string()]);
+            UserBasic {
+                username,
+                email,
+                first_name,
+                last_name,
+                roles: roles_for_user,
+            }
+        })
+        .collect();
+
+    Ok(users)
 }

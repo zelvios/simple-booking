@@ -2,7 +2,6 @@ use chrono::{DateTime, Utc};
 use diesel::backend::RawValue;
 use diesel::deserialize::FromSql;
 use diesel::pg::Pg;
-use diesel::prelude::*;
 use diesel::serialize::{IsNull, Output, ToSql};
 use diesel::{
     deserialize, serialize, AsExpression, Associations, FromSqlRow, Identifiable, Insertable,
@@ -104,4 +103,5 @@ pub struct UserBasic {
     pub email: String,
     pub first_name: String,
     pub last_name: String,
+    pub roles: Vec<String>,
 }

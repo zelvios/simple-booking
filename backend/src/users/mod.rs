@@ -78,6 +78,7 @@ pub async fn get_users_endpoint(pool: web::Data<DbPool>) -> HttpResponse {
                         "email": user.email,
                         "first_name": user.first_name,
                         "last_name": user.last_name,
+                        "roles": user.roles,
                     })
                 })
                 .collect::<Vec<_>>(),
