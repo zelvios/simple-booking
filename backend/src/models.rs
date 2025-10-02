@@ -4,8 +4,8 @@ use diesel::deserialize::FromSql;
 use diesel::pg::Pg;
 use diesel::serialize::{IsNull, Output, ToSql};
 use diesel::{
-    deserialize, serialize, AsExpression, Associations, FromSqlRow, Identifiable, Insertable,
-    Queryable,
+    deserialize, serialize, AsChangeset, AsExpression, Associations, FromSqlRow, Identifiable,
+    Insertable, Queryable,
 };
 use serde::{Deserialize, Serialize};
 use std::io::Write;
@@ -104,4 +104,20 @@ pub struct UserBasic {
     pub first_name: String,
     pub last_name: String,
     pub roles: Vec<String>,
+}
+
+#[derive(AsChangeset)]
+#[diesel(table_name = users)]
+pub struct UpdateUserChangeset {
+    pub username: Option<String>,
+    pub email: Option<String>,
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
+}
+
+#[derive(AsChangeset)]
+#[diesel(table_name = users)]
+pub struct UpdatePasswordChangeset {
+    pub password_hash: String,
+    pub token_version: i32,
 }

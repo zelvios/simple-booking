@@ -6,7 +6,8 @@ mod services;
 mod users;
 
 use crate::users::{
-    create_user_endpoint, get_users_endpoint, sign_in_endpoint, users_verify_token_endpoint,
+    create_user_endpoint, get_users_endpoint, sign_in_endpoint, update_user_endpoint,
+    update_user_password_endpoint, users_verify_token_endpoint,
 };
 use actix_web::{web, App, HttpServer};
 use diesel::pg::PgConnection;
@@ -35,6 +36,8 @@ async fn main() -> anyhow::Result<()> {
             .service(get_users_endpoint)
             .service(sign_in_endpoint)
             .service(users_verify_token_endpoint)
+            .service(update_user_endpoint)
+            .service(update_user_password_endpoint)
     })
     .bind(("0.0.0.0", 3000))?
     .run()

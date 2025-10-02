@@ -1,5 +1,7 @@
 use crate::models::{NewUser, User, UserBasic};
-use anyhow::Result;
+use crate::users::{UpdatePasswordRequest, UpdateUserRequest};
+use actix_web::{HttpRequest, HttpResponse};
+use anyhow::{anyhow, Result};
 use argon2::{password_hash::SaltString, Argon2, PasswordHasher, PasswordVerifier};
 use chrono::Utc;
 use diesel::prelude::*;
@@ -12,6 +14,68 @@ use std::collections::HashMap;
 use std::env;
 use uuid::Uuid;
 
+#[derive(Serialize, Deserialize)]
+struct Claims {
+    sub: Uuid,
+    username: String,
+    token_version: i32,
+    exp: i64,
+}
+
+pub(crate) fn validate_password(password: &str) -> Result<(), String> {
+    if password.len() < 8 {
+        return Err("Password must be at least 8 characters long".into());
+    }
+
+    if !password.chars().any(|c| c.is_uppercase()) {
+        return Err("Password must contain at least one uppercase letter".into());
+    }
+
+    if !password.chars().any(|c| c.is_lowercase()) {
+        return Err("Password must contain at least one lowercase letter".into());
+    }
+
+    if !password.chars().any(|c| c.is_numeric()) {
+        return Err("Password must contain at least one number".into());
+    }
+
+    let special_chars = "!@#$%^&*()-_=+[]{}|;:'\",.<>?/`~";
+    if !password.chars().any(|c| special_chars.contains(c)) {
+        return Err("Password must contain at least one special character".into());
+    }
+
+    Ok(())
+}
+
+pub fn validate_user_fields(
+    username: Option<&str>,
+    first_name: Option<&str>,
+    last_name: Option<&str>,
+    email: Option<&str>,
+) -> Result<(), String> {
+    if username.map(|u| u.len() < 3).unwrap_or(false) {
+        return Err("Username must be at least 3 characters long".into());
+    }
+
+    if first_name.map(|f| f.len() < 3).unwrap_or(false) {
+        return Err("First name must be at least 3 characters long".into());
+    }
+
+    if last_name.map(|l| l.len() < 3).unwrap_or(false) {
+        return Err("Last name must be at least 3 characters long".into());
+    }
+
+    if email.map(|e| e.len() < 3).unwrap_or(false) {
+        return Err("Email must be at least 3 characters long".into());
+    }
+
+    Ok(())
+}
+
+fn generate_new_token_version() -> i32 {
+    rand::thread_rng().gen_range(1..=i32::MAX)
+}
+
 fn get_jwt_expire() -> i64 {
     env::var("JWT_EXPIRE_SECONDS")
         .ok()
@@ -19,12 +83,15 @@ fn get_jwt_expire() -> i64 {
         .unwrap_or(3600) // 1 hour
 }
 
-#[derive(Serialize, Deserialize)]
-struct Claims {
-    sub: Uuid,
-    username: String,
-    token_version: i32,
-    exp: i64,
+pub fn extract_bearer_token(req: &HttpRequest) -> Result<String, HttpResponse> {
+    match req.headers().get("Authorization") {
+        Some(hdr_value) => match hdr_value.to_str() {
+            Ok(s) if s.starts_with("Bearer ") => Ok(s.trim_start_matches("Bearer ").to_string()),
+            Ok(_) => Err(HttpResponse::Unauthorized().body("Invalid Authorization header format")),
+            Err(_) => Err(HttpResponse::Unauthorized().body("Invalid header value")),
+        },
+        None => Err(HttpResponse::Unauthorized().body("Missing Authorization header")),
+    }
 }
 
 pub fn hash_password(password: &str) -> std::result::Result<String, argon2::password_hash::Error> {
@@ -78,6 +145,14 @@ pub fn create_user(
     secret: &str,
 ) -> Result<(User, String)> {
     use anyhow::anyhow;
+
+    validate_user_fields(
+        Some(&new_user.username),
+        Some(&new_user.first_name),
+        Some(&new_user.last_name),
+        Some(&new_user.email),
+    )
+    .map_err(|e| anyhow::anyhow!(e))?;
 
     if email_exists(conn, &new_user.email)? {
         return Err(anyhow!("Email already in use"));
@@ -172,7 +247,7 @@ pub fn signin_user(
         .verify_password(password.as_bytes(), &parsed_hash)
         .map_err(|_| anyhow!("Invalid username/email or password"))?;
 
-    let new_token_version: i32 = rand::thread_rng().gen_range(1..=i32::MAX);
+    let new_token_version: i32 = generate_new_token_version();
     let updated_user = diesel::update(users.find(user.id))
         .set(token_version.eq(new_token_version))
         .get_result::<User>(conn)?;
@@ -208,4 +283,121 @@ pub fn verify_token(conn: &mut PgConnection, token: &str, secret: &str) -> Resul
             _ => Ok((false, "invalid".to_string())),
         },
     }
+}
+
+pub fn update_user(
+    conn: &mut PgConnection,
+    token: &str,
+    secret: &str,
+    data: UpdateUserRequest,
+) -> Result<User> {
+    use crate::schema::users::dsl::*;
+
+    let claims = decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(secret.as_ref()),
+        &Validation::default(),
+    )?
+    .claims;
+
+    let current_token_version: i32 = users
+        .filter(id.eq(claims.sub))
+        .select(token_version)
+        .first(conn)?;
+
+    if current_token_version != claims.token_version {
+        return Err(anyhow::anyhow!("Invalid or expired token"));
+    }
+
+    if let Some(ref new_username) = data.username {
+        if username_exists(conn, new_username)? {
+            return Err(anyhow::anyhow!("Username already taken"));
+        }
+    }
+
+    if let Some(ref new_email) = data.email {
+        if email_exists(conn, new_email)? {
+            return Err(anyhow::anyhow!("Email already in use"));
+        }
+    }
+
+    validate_user_fields(
+        data.username.as_deref(),
+        data.first_name.as_deref(),
+        data.last_name.as_deref(),
+        data.email.as_deref(),
+    )
+    .map_err(|e| anyhow::anyhow!(e))?;
+
+    let changes = crate::models::UpdateUserChangeset {
+        username: data.username,
+        email: data.email,
+        first_name: data.first_name,
+        last_name: data.last_name,
+    };
+
+    let updated_user = diesel::update(users.find(claims.sub))
+        .set(&changes)
+        .get_result::<User>(conn)?;
+
+    Ok(updated_user)
+}
+
+pub fn update_password(
+    conn: &mut PgConnection,
+    token: &str,
+    secret: &str,
+    data: UpdatePasswordRequest,
+) -> Result<()> {
+    use crate::schema::users::dsl::*;
+
+    let claims = decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(secret.as_ref()),
+        &Validation::default(),
+    )?
+    .claims;
+
+    let (current_token_version, current_password_hash): (i32, String) = users
+        .filter(id.eq(claims.sub))
+        .select((token_version, password_hash))
+        .first(conn)?;
+
+    if current_token_version != claims.token_version {
+        return Err(anyhow::anyhow!("Invalid or expired token"));
+    }
+
+    let parsed_hash = argon2::PasswordHash::new(&current_password_hash)
+        .map_err(|e| anyhow::anyhow!("Failed to parse password hash: {}", e))?;
+    Argon2::default()
+        .verify_password(data.old_password.as_bytes(), &parsed_hash)
+        .map_err(|_| anyhow::anyhow!("Invalid old password"))?;
+
+    if Argon2::default()
+        .verify_password(data.new_password.as_bytes(), &parsed_hash)
+        .is_ok()
+    {
+        return Err(anyhow::anyhow!(
+            "New password cannot be the same as the old password"
+        ));
+    }
+
+    validate_password(&data.new_password)
+        .map_err(|e| anyhow::anyhow!("New password validation failed: {}", e))?;
+
+    let new_hash = hash_password(&data.new_password)
+        .map_err(|_| anyhow::anyhow!("Failed to hash new password"))?;
+
+    let new_version: i32 = generate_new_token_version();
+
+    let changes = crate::models::UpdatePasswordChangeset {
+        password_hash: new_hash,
+        token_version: new_version,
+    };
+
+    diesel::update(users.find(claims.sub))
+        .set(&changes)
+        .execute(conn)?;
+
+    Ok(())
 }

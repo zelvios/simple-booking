@@ -1,6 +1,6 @@
 use crate::models::NewUser;
 use crate::{services, DbPool};
-use actix_web::{get, post, web, HttpResponse};
+use actix_web::{get, patch, post, web, HttpResponse};
 use serde::Deserialize;
 
 pub mod service;
@@ -25,6 +25,20 @@ pub struct VerifyTok {
     pub token: Option<String>,
 }
 
+#[derive(Deserialize)]
+pub struct UpdateUserRequest {
+    pub username: Option<String>,
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
+    pub email: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct UpdatePasswordRequest {
+    pub old_password: String,
+    pub new_password: String,
+}
+
 #[post("/users")]
 pub async fn create_user_endpoint(
     pool: web::Data<DbPool>,
@@ -35,6 +49,10 @@ pub async fn create_user_endpoint(
         Err(err) => return err,
     };
     let secret = services::get_jwt_secret();
+
+    if let Err(err_msg) = service::validate_password(&body.password) {
+        return HttpResponse::BadRequest().body(format!("Password validation failed: {}", err_msg));
+    }
 
     let password_hash = match service::hash_password(&body.password) {
         Ok(hash) => hash,
@@ -173,6 +191,79 @@ pub async fn users_verify_token_endpoint(
         Err(e) => {
             eprintln!("blocking error: {}", e);
             HttpResponse::InternalServerError().body("Error verifying token")
+        }
+    }
+}
+
+#[patch("/user")]
+pub async fn update_user_endpoint(
+    pool: web::Data<DbPool>,
+    req: actix_web::HttpRequest,
+    body: web::Json<UpdateUserRequest>,
+) -> HttpResponse {
+    let token = match service::extract_bearer_token(&req) {
+        Ok(t) => t,
+        Err(resp) => return resp,
+    };
+
+    let mut conn = match services::get_conn(&pool) {
+        Ok(c) => c,
+        Err(err) => return err,
+    };
+    let secret = services::get_jwt_secret();
+
+    match web::block(move || service::update_user(&mut conn, &token, &secret, body.into_inner()))
+        .await
+    {
+        Ok(Ok(user)) => HttpResponse::Ok().json(serde_json::json!({
+            "user": {
+                "username": user.username,
+                "email": user.email,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+            }
+        })),
+        Ok(Err(e)) => {
+            eprintln!("Update user error: {}", e);
+            HttpResponse::BadRequest().body(format!("Error updating user: {}", e))
+        }
+        Err(e) => {
+            eprintln!("Blocking error: {}", e);
+            HttpResponse::InternalServerError().body("Error updating user")
+        }
+    }
+}
+
+#[patch("/user/password")]
+pub async fn update_user_password_endpoint(
+    pool: web::Data<DbPool>,
+    req: actix_web::HttpRequest,
+    body: web::Json<UpdatePasswordRequest>,
+) -> HttpResponse {
+    let token = match service::extract_bearer_token(&req) {
+        Ok(t) => t,
+        Err(resp) => return resp,
+    };
+
+    let mut conn = match services::get_conn(&pool) {
+        Ok(c) => c,
+        Err(err) => return err,
+    };
+    let secret = services::get_jwt_secret();
+
+    match web::block(move || {
+        service::update_password(&mut conn, &token, &secret, body.into_inner())
+    })
+    .await
+    {
+        Ok(Ok(())) => HttpResponse::Ok().json(serde_json::json!({"success": true})),
+        Ok(Err(e)) => {
+            eprintln!("Update password error: {}", e);
+            HttpResponse::BadRequest().body(format!("Error updating password: {}", e))
+        }
+        Err(e) => {
+            eprintln!("Blocking error: {}", e);
+            HttpResponse::InternalServerError().body("Error updating password")
         }
     }
 }
